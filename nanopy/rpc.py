@@ -13,19 +13,19 @@ class RPC:
     :arg str url: URL of the nano node
     :arg dict headers: Optional headers for the RPC requests
     :arg bool tor: Whether to connect via TOR network.
-    
+
     Refer `docs <https://docs.nano.org/commands/rpc-protocol>`_ for information on methods.
-    
+
     Return type is ``dict`` for all methods except ``disconnect``.
     """
 
     def __init__(self, url="http://localhost:7076", headers={}, tor=False):
         if url[:7] == "http://" or url[:8] == "https://":
             self.__mode = "requests"
-            self.session = requests.session()
-            self.session.proxies = {}
+            self.API = requests.session()
+            self.API.proxies = {}
             if tor:
-                self.session.proxies["http"] = self.session.proxies[
+                self.API.proxies["http"] = self.API.proxies[
                     "https"
                 ] = "socks5h://localhost:9050"
         elif url[:5] == "ws://" or url[:6] == "wss://":
@@ -33,15 +33,15 @@ class RPC:
 
             self.__mode = "websockets"
             if tor:
-                self.session = create_connection(
+                self.API = create_connection(
                     url,
                     http_proxy_host="localhost",
                     http_proxy_port=9050,
                     proxy_type="socks5h",
                 )
             else:
-                self.session = create_connection(url)
-            self.session.settimeout(20.0)
+                self.API = create_connection(url)
+            self.API.settimeout(20.0)
         else:
             raise Exception("Unable to parse url: " + url)
         self.__url = url
@@ -49,27 +49,34 @@ class RPC:
 
     def _get(self):
         if self.__mode == "requests":
-            return self.session.get(self.__url, headers=self.__headers).json()
+            response = self.API.get(self.__url, headers=self.__headers)
+            response.raise_for_status()
+            return response.json()
 
     def _post(self, data):
         if self.__mode == "requests":
-            return self.session.post(
-                self.__url, json=data, headers=self.__headers
-            ).json()
+            response = self.API.post(self.__url, json=data, headers=self.__headers)
+            response.raise_for_status()
+            return response.json()
         elif self.__mode == "websockets":
-            self.session.send(json.dumps(data))
-            return json.loads(self.session.recv())
+            self.API.send(json.dumps(data))
+            response = self.API.recv()
+            return json.loads(response)
 
     def disconnect(self):
         "Close RPC connection. Only necessary for websocket connections."
         if self.__mode == "websockets":
-            self.session.close()
+            self.API.close()
 
-    def account_balance(self, account):
+    # Node RPCs
+
+    def account_balance(self, account, include_only_confirmed=True):
         "https://docs.nano.org/commands/rpc-protocol/#account_balance"
         data = {}
         data["action"] = "account_balance"
         data["account"] = account
+        if not include_only_confirmed:
+            data["include_only_confirmed"] = False
         return self._post(data)
 
     def account_block_count(self, account):
@@ -77,30 +84,6 @@ class RPC:
         data = {}
         data["action"] = "account_block_count"
         data["account"] = account
-        return self._post(data)
-
-    def account_info(self, account, representative=False, weight=False, pending=False):
-        "https://docs.nano.org/commands/rpc-protocol/#account_info"
-        data = {}
-        data["action"] = "account_info"
-        data["account"] = account
-        if representative:
-            data["representative"] = True
-        if weight:
-            data["weight"] = True
-        if pending:
-            data["pending"] = True
-        return self._post(data)
-
-    def account_create(self, wallet, index=0, work=True):
-        "https://docs.nano.org/commands/rpc-protocol/#account_create"
-        data = {}
-        data["action"] = "account_create"
-        data["wallet"] = wallet
-        if index:
-            data["index"] = index
-        if not work:
-            data["work"] = False
         return self._post(data)
 
     def account_get(self, key):
@@ -137,20 +120,26 @@ class RPC:
             data["account_filter"] = account_filter
         return self._post(data)
 
-    def account_list(self, wallet):
-        "https://docs.nano.org/commands/rpc-protocol/#account_list"
+    def account_info(
+        self,
+        account,
+        include_confirmed=False,
+        representative=False,
+        weight=False,
+        pending=False,
+    ):
+        "https://docs.nano.org/commands/rpc-protocol/#account_info"
         data = {}
-        data["action"] = "account_list"
-        data["wallet"] = wallet
-        return self._post(data)
-
-    def account_move(self, wallet, source, accounts):
-        "https://docs.nano.org/commands/rpc-protocol/#account_move"
-        data = {}
-        data["action"] = "account_move"
-        data["wallet"] = wallet
-        data["source"] = source
-        data["accounts"] = accounts
+        data["action"] = "account_info"
+        data["account"] = account
+        if include_confirmed:
+            data["include_confirmed"] = True
+        if representative:
+            data["representative"] = True
+        if weight:
+            data["weight"] = True
+        if pending:
+            data["pending"] = True
         return self._post(data)
 
     def account_key(self, account):
@@ -160,30 +149,11 @@ class RPC:
         data["account"] = account
         return self._post(data)
 
-    def account_remove(self, wallet, account):
-        "https://docs.nano.org/commands/rpc-protocol/#account_remove"
-        data = {}
-        data["action"] = "account_remove"
-        data["wallet"] = wallet
-        data["account"] = account
-        return self._post(data)
-
     def account_representative(self, account):
         "https://docs.nano.org/commands/rpc-protocol/#account_representative"
         data = {}
         data["action"] = "account_representative"
         data["account"] = account
-        return self._post(data)
-
-    def account_representative_set(self, wallet, account, representative, work=None):
-        "https://docs.nano.org/commands/rpc-protocol/#account_representative_set"
-        data = {}
-        data["action"] = "account_representative_set"
-        data["wallet"] = wallet
-        data["account"] = account
-        data["representative"] = representative
-        if work:
-            data["work"] = work
         return self._post(data)
 
     def account_weight(self, account):
@@ -198,16 +168,6 @@ class RPC:
         data = {}
         data["action"] = "accounts_balances"
         data["accounts"] = accounts
-        return self._post(data)
-
-    def accounts_create(self, wallet, count=1, work=True):
-        "https://docs.nano.org/commands/rpc-protocol/#accounts_create"
-        data = {}
-        data["action"] = "accounts_create"
-        data["wallet"] = wallet
-        data["count"] = count
-        if not work:
-            data["work"] = False
         return self._post(data)
 
     def accounts_frontiers(self, accounts):
@@ -225,7 +185,7 @@ class RPC:
         source=False,
         include_active=False,
         sorting=False,
-        include_only_confirmed=False,
+        include_only_confirmed=True,
     ):
         "https://docs.nano.org/commands/rpc-protocol/#accounts_pending"
         data = {}
@@ -240,22 +200,100 @@ class RPC:
             data["include_active"] = True
         if sorting:
             data["sorting"] = True
-        if include_only_confirmed:
-            data["include_only_confirmed"] = True
+        if not include_only_confirmed:
+            data["include_only_confirmed"] = False
         return self._post(data)
 
-    def active_difficulty(self, include_trend=False):
-        "https://docs.nano.org/commands/rpc-protocol/#active_difficulty"
+    def accounts_representatives(self, accounts):
+        "https://docs.nano.org/commands/rpc-protocol/#accounts_representatives"
         data = {}
-        data["action"] = "active_difficulty"
-        if include_trend:
-            data["include_trend"] = True
+        data["action"] = "accounts_representatives"
+        data["accounts"] = accounts
         return self._post(data)
 
     def available_supply(self):
         "https://docs.nano.org/commands/rpc-protocol/#available_supply"
         data = {}
         data["action"] = "available_supply"
+        return self._post(data)
+
+    def block_account(self, _hash):
+        "https://docs.nano.org/commands/rpc-protocol/#block_account"
+        data = {}
+        data["action"] = "block_account"
+        data["hash"] = _hash
+        return self._post(data)
+
+    def block_confirm(self, _hash):
+        "https://docs.nano.org/commands/rpc-protocol/#block_confirm"
+        data = {}
+        data["action"] = "block_confirm"
+        data["hash"] = _hash
+        return self._post(data)
+
+    def block_count(self, include_cemented=True):
+        "https://docs.nano.org/commands/rpc-protocol/#block_count"
+        data = {}
+        data["action"] = "block_count"
+        if not include_cemented:
+            data["include_cemented"] = False
+        return self._post(data)
+
+    def block_create(
+        self,
+        balance,
+        representative,
+        previous,
+        wallet=None,
+        account=None,
+        key=None,
+        source=None,
+        destination=None,
+        link=None,
+        work=None,
+        version="work_1",
+        json_block=False,
+        difficulty=None,
+    ):
+        "https://docs.nano.org/commands/rpc-protocol/#block_create"
+        data = {}
+        data["action"] = "block_create"
+        data["type"] = "state"
+        data["balance"] = balance
+        if wallet:
+            data["wallet"] = wallet
+        if account:
+            data["account"] = account
+        if key:
+            data["key"] = key
+        if source:
+            data["source"] = source
+        if destination:
+            data["destination"] = destination
+        if link:
+            data["link"] = link
+        data["representative"] = representative
+        data["previous"] = previous
+        if work:
+            data["work"] = work
+        elif difficulty:
+            data["difficulty"] = difficulty
+        # Currently 'work_1' is the default and only valid option.
+        # if version in []: data['version'] = version
+        if json_block:
+            data["json_block"] = True
+        return self._post(data)
+
+    def block_hash(self, block, json_block=False):
+        "https://docs.nano.org/commands/rpc-protocol/#block_hash"
+        data = {}
+        data["action"] = "block_hash"
+        if type(block) == str:
+            data["block"] = block
+        else:
+            data["block"] = json.dumps(block)
+        if json_block:
+            data["json_block"] = True
         return self._post(data)
 
     def block_info(self, _hash, json_block=False):
@@ -267,11 +305,13 @@ class RPC:
             data["json_block"] = True
         return self._post(data)
 
-    def blocks(self, hashes):
+    def blocks(self, hashes, json_block=False):
         "https://docs.nano.org/commands/rpc-protocol/#blocks"
         data = {}
         data["action"] = "blocks"
         data["hashes"] = hashes
+        if json_block:
+            data["json_block"] = True
         return self._post(data)
 
     def blocks_info(
@@ -299,50 +339,26 @@ class RPC:
             data["include_not_found"] = True
         return self._post(data)
 
-    def block_account(self, _hash):
-        "https://docs.nano.org/commands/rpc-protocol/#block_account"
-        data = {}
-        data["action"] = "block_account"
-        data["hash"] = _hash
-        return self._post(data)
-
-    def block_confirm(self, _hash):
-        "https://docs.nano.org/commands/rpc-protocol/#block_confirm"
-        data = {}
-        data["action"] = "block_confirm"
-        data["hash"] = _hash
-        return self._post(data)
-
-    def block_count(self, include_cemented=True):
-        "https://docs.nano.org/commands/rpc-protocol/#block_count"
-        data = {}
-        data["action"] = "block_count"
-        if not include_cemented:
-            data["include_cemented"] = False
-        return self._post(data)
-
-    def block_hash(self, block, json_block=False):
-        "https://docs.nano.org/commands/rpc-protocol/#block_hash"
-        data = {}
-        data["action"] = "block_hash"
-        if type(block) == str:
-            data["block"] = block
-        else:
-            data["block"] = json.dumps(block)
-        if json_block:
-            data["json_block"] = True
-        return self._post(data)
-
     def bootstrap(self, address, port, bypass_frontier_confirmation=False, _id=""):
         "https://docs.nano.org/commands/rpc-protocol/#bootstrap"
         data = {}
         data["action"] = "bootstrap"
         data["address"] = address
         data["port"] = port
-        if bypass_frontier_confirmation:
-            data["bypass_frontier_confirmation"] = True
         if _id:
             data["id"] = _id
+        return self._post(data)
+
+    def bootstrap_any(self, force=False, _id="", account=""):
+        "https://docs.nano.org/commands/rpc-protocol/#bootstrap_any"
+        data = {}
+        data["action"] = "bootstrap_any"
+        if force:
+            data["force"] = True
+        if _id:
+            data["id"] = _id
+        if account:
+            data["account"] = account
         return self._post(data)
 
     def bootstrap_lazy(self, hash_, force=False, _id=""):
@@ -350,16 +366,6 @@ class RPC:
         data = {}
         data["action"] = "bootstrap_lazy"
         data["hash"] = hash_
-        if force:
-            data["force"] = True
-        if _id:
-            data["id"] = _id
-        return self._post(data)
-
-    def bootstrap_any(self, force=False, _id=""):
-        "https://docs.nano.org/commands/rpc-protocol/#bootstrap_any"
-        data = {}
-        data["action"] = "bootstrap_any"
         if force:
             data["force"] = True
         if _id:
@@ -437,11 +443,17 @@ class RPC:
         data["min_write_time"] = min_write_time
         return self._post(data)
 
-    def delegators(self, account):
+    def delegators(self, account, threshold=0, count=0, start=""):
         "https://docs.nano.org/commands/rpc-protocol/#delegators"
         data = {}
         data["action"] = "delegators"
         data["account"] = account
+        if threshold:
+            data["threshold"] = threshold
+        if count:
+            data["count"] = count
+        if start:
+            data["start"] = start
         return self._post(data)
 
     def delegators_count(self, account):
@@ -471,60 +483,18 @@ class RPC:
             data["threads"] = threads
         return self._post(data)
 
-    def frontiers(self, account, count=1):
-        "https://docs.nano.org/commands/rpc-protocol/#frontiers"
-        data = {}
-        data["action"] = "frontiers"
-        data["account"] = account
-        data["count"] = count
-        return self._post(data)
-
     def frontier_count(self):
         "https://docs.nano.org/commands/rpc-protocol/#frontier_count"
         data = {}
         data["action"] = "frontier_count"
         return self._post(data)
 
-    def mrai_from_raw(self, amount):
-        "https://docs.nano.org/commands/rpc-protocol/#mrai_from_raw"
+    def frontiers(self, account, count=1):
+        "https://docs.nano.org/commands/rpc-protocol/#frontiers"
         data = {}
-        data["action"] = "mrai_from_raw"
-        data["amount"] = amount
-        return self._post(data)
-
-    def mrai_to_raw(self, amount):
-        "https://docs.nano.org/commands/rpc-protocol/#mrai_to_raw"
-        data = {}
-        data["action"] = "mrai_to_raw"
-        data["amount"] = amount
-        return self._post(data)
-
-    def krai_from_raw(self, amount):
-        "https://docs.nano.org/commands/rpc-protocol/#krai_from_raw"
-        data = {}
-        data["action"] = "krai_from_raw"
-        data["amount"] = amount
-        return self._post(data)
-
-    def krai_to_raw(self, amount):
-        "https://docs.nano.org/commands/rpc-protocol/#krai_to_raw"
-        data = {}
-        data["action"] = "krai_to_raw"
-        data["amount"] = amount
-        return self._post(data)
-
-    def rai_from_raw(self, amount):
-        "https://docs.nano.org/commands/rpc-protocol/#rai_from_raw"
-        data = {}
-        data["action"] = "rai_from_raw"
-        data["amount"] = amount
-        return self._post(data)
-
-    def rai_to_raw(self, amount):
-        "https://docs.nano.org/commands/rpc-protocol/#rai_to_raw"
-        data = {}
-        data["action"] = "rai_to_raw"
-        data["amount"] = amount
+        data["action"] = "frontiers"
+        data["account"] = account
+        data["count"] = count
         return self._post(data)
 
     def keepalive(self, address, port):
@@ -554,7 +524,7 @@ class RPC:
         count=1,
         representative=False,
         weight=False,
-        pending=False,
+        receivable=False,
         modified_since=0,
         sorting=False,
         threshold=0,
@@ -568,59 +538,14 @@ class RPC:
             data["representative"] = True
         if weight:
             data["weight"] = True
-        if pending:
-            data["pending"] = True
+        if receivable:
+            data["receivable"] = True
         if modified_since:
             data["modified_since"] = modified_since
         if sorting:
             data["sorting"] = True
         if threshold:
             data["threshold"] = threshold
-        return self._post(data)
-
-    def block_create(
-        self,
-        balance,
-        representative,
-        previous,
-        wallet=None,
-        account=None,
-        key=None,
-        source=None,
-        destination=None,
-        link=None,
-        work=None,
-        version="work_1",
-        json_block=False,
-        difficulty=None,
-    ):
-        "https://docs.nano.org/commands/rpc-protocol/#block_create"
-        data = {}
-        data["action"] = "block_create"
-        data["type"] = "state"
-        data["balance"] = balance
-        if wallet:
-            data["wallet"] = wallet
-        if account:
-            data["account"] = account
-        if key:
-            data["key"] = key
-        if source:
-            data["source"] = source
-        if destination:
-            data["destination"] = destination
-        if link:
-            data["link"] = link
-        data["representative"] = representative
-        data["previous"] = previous
-        if work:
-            data["work"] = work
-        elif difficulty:
-            data["difficulty"] = difficulty
-        # Currently 'work_1' is the default and only valid option.
-        # if version in []: data['version'] = version
-        if json_block:
-            data["json_block"] = True
         return self._post(data)
 
     def node_id(self):
@@ -635,19 +560,22 @@ class RPC:
         data["action"] = "node_id_delete"
         return self._post(data)
 
-    def telemetry(self, raw=False, address=0, port="7075"):
-        "https://docs.nano.org/commands/rpc-protocol/#telemetry"
+    def peers(self, peer_details=False):
+        "https://docs.nano.org/commands/rpc-protocol/#peers"
         data = {}
-        data["action"] = "telemetry"
-        if raw:
-            data["raw"] = True
-        if address:
-            data["address"] = address
-            data["port"] = port
+        data["action"] = "peers"
+        if peer_details:
+            data["peer_details"] = True
         return self._post(data)
 
     def process(
-        self, block, force=False, subtype=None, json_block=False, watch_work=True
+        self,
+        block,
+        force=False,
+        subtype=None,
+        json_block=False,
+        watch_work=True,
+        _async=False,
     ):
         "https://docs.nano.org/commands/rpc-protocol/#process"
         data = {}
@@ -664,30 +592,52 @@ class RPC:
             data["json_block"] = True
         if not watch_work:
             data["watch_work"] = False
+        if _async:
+            data["async"] = True
         return self._post(data)
 
-    def receive(self, wallet, account, block, work=None):
-        "https://docs.nano.org/commands/rpc-protocol/#receive"
+    def receivable(
+        self,
+        account,
+        count=0,
+        threshold=0,
+        source=False,
+        include_active=False,
+        min_version=False,
+        sorting=False,
+        include_only_confirmed=True,
+    ):
+        "https://docs.nano.org/commands/rpc-protocol/#receivable"
         data = {}
-        data["action"] = "receive"
-        data["wallet"] = wallet
+        data["action"] = "receivable"
         data["account"] = account
-        data["block"] = block
-        if work:
-            data["work"] = work
+        if count:
+            data["count"] = count
+        if threshold:
+            data["threshold"] = threshold
+        if source:
+            data["source"] = True
+        if include_active:
+            data["include_active"] = True
+        if min_version:
+            data["min_version"] = True
+        if sorting:
+            data["sorting"] = True
+        if not include_only_confirmed:
+            data["include_only_confirmed"] = False
         return self._post(data)
 
-    def receive_minimum(self):
-        "https://docs.nano.org/commands/rpc-protocol/#receive_minimum"
+    def receivable_exists(
+        self, _hash, include_active=False, include_only_confirmed=True
+    ):
+        "https://docs.nano.org/commands/rpc-protocol/#receivable_exists"
         data = {}
-        data["action"] = "receive_minimum"
-        return self._post(data)
-
-    def receive_minimum_set(self, amount):
-        "https://docs.nano.org/commands/rpc-protocol/#receive_minimum_set"
-        data = {}
-        data["action"] = "receive_minimum_set"
-        data["amount"] = amount
+        data["action"] = "receivable_exists"
+        data["hash"] = _hash
+        if include_active:
+            data["include_active"] = True
+        if not include_only_confirmed:
+            data["include_only_confirmed"] = False
         return self._post(data)
 
     def representatives(self, count=1, sorting=False):
@@ -699,31 +649,14 @@ class RPC:
             data["sorting"] = True
         return self._post(data)
 
-    def representatives_online(self, weight=False):
+    def representatives_online(self, weight=False, accounts=[]):
         "https://docs.nano.org/commands/rpc-protocol/#representatives_online"
         data = {}
         data["action"] = "representatives_online"
         if weight:
             data["weight"] = True
-        return self._post(data)
-
-    def wallet_representative(self, wallet):
-        "https://docs.nano.org/commands/rpc-protocol/#wallet_representative"
-        data = {}
-        data["action"] = "wallet_representative"
-        data["wallet"] = wallet
-        return self._post(data)
-
-    def wallet_representative_set(
-        self, wallet, representative, update_existing_accounts=False
-    ):
-        "https://docs.nano.org/commands/rpc-protocol/#wallet_representative_set"
-        data = {}
-        data["action"] = "wallet_representative_set"
-        data["wallet"] = wallet
-        data["representative"] = representative
-        if update_existing_accounts:
-            data["update_existing_accounts"] = True
+        if accounts:
+            data["accounts"] = repr(accounts)
         return self._post(data)
 
     def republish(self, _hash, count=1, sources=0, destinations=0):
@@ -737,33 +670,6 @@ class RPC:
         if destinations:
             data["destinations"] = destinations
             data["count"] = count
-        return self._post(data)
-
-    def search_pending(self, wallet):
-        "https://docs.nano.org/commands/rpc-protocol/#search_pending"
-        data = {}
-        data["action"] = "search_pending"
-        data["wallet"] = wallet
-        return self._post(data)
-
-    def search_pending_all(self):
-        "https://docs.nano.org/commands/rpc-protocol/#search_pending_all"
-        data = {}
-        data["action"] = "search_pending_all"
-        return self._post(data)
-
-    def send(self, wallet, source, destination, amount, _id=None, work=None):
-        "https://docs.nano.org/commands/rpc-protocol/#send"
-        data = {}
-        data["action"] = "send"
-        data["wallet"] = wallet
-        data["source"] = source
-        data["destination"] = destination
-        data["amount"] = amount
-        if _id:
-            data["id"] = _id
-        if work:
-            data["work"] = work
         return self._post(data)
 
     def sign(self, key="", wallet="", account="", block="", _hash="", json_block=False):
@@ -805,13 +711,6 @@ class RPC:
         data["action"] = "stop"
         return self._post(data)
 
-    def validate_account_number(self, account):
-        "https://docs.nano.org/commands/rpc-protocol/#validate_account_number"
-        data = {}
-        data["action"] = "validate_account_number"
-        data["account"] = account
-        return self._post(data)
-
     def successors(self, block, count=1, offset=0, reverse=False):
         "https://docs.nano.org/commands/rpc-protocol/#successors"
         data = {}
@@ -824,60 +723,28 @@ class RPC:
             data["reverse"] = True
         return self._post(data)
 
+    def telemetry(self, raw=False, address=0, port="7075"):
+        "https://docs.nano.org/commands/rpc-protocol/#telemetry"
+        data = {}
+        data["action"] = "telemetry"
+        if raw:
+            data["raw"] = True
+        if address:
+            data["address"] = address
+            data["port"] = port
+        return self._post(data)
+
+    def validate_account_number(self, account):
+        "https://docs.nano.org/commands/rpc-protocol/#validate_account_number"
+        data = {}
+        data["action"] = "validate_account_number"
+        data["account"] = account
+        return self._post(data)
+
     def version(self):
         "https://docs.nano.org/commands/rpc-protocol/#version"
         data = {}
         data["action"] = "version"
-        return self._post(data)
-
-    def peers(self, peer_details=False):
-        "https://docs.nano.org/commands/rpc-protocol/#peers"
-        data = {}
-        data["action"] = "peers"
-        if peer_details:
-            data["peer_details"] = True
-        return self._post(data)
-
-    def pending(
-        self,
-        account,
-        count=0,
-        threshold=0,
-        source=False,
-        include_active=False,
-        min_version=False,
-        sorting=False,
-        include_only_confirmed=False,
-    ):
-        "https://docs.nano.org/commands/rpc-protocol/#pending"
-        data = {}
-        data["action"] = "pending"
-        data["account"] = account
-        if count:
-            data["count"] = count
-        if threshold:
-            data["threshold"] = threshold
-        if source:
-            data["source"] = True
-        if include_active:
-            data["include_active"] = True
-        if min_version:
-            data["min_version"] = True
-        if sorting:
-            data["sorting"] = True
-        if include_only_confirmed:
-            data["include_only_confirmed"] = True
-        return self._post(data)
-
-    def pending_exists(self, _hash, include_active=False, include_only_confirmed=False):
-        "https://docs.nano.org/commands/rpc-protocol/#pending_exists"
-        data = {}
-        data["action"] = "pending_exists"
-        data["hash"] = _hash
-        if include_active:
-            data["include_active"] = True
-        if include_only_confirmed:
-            data["include_only_confirmed"] = True
         return self._post(data)
 
     def unchecked(self, json_block=False, count=1):
@@ -930,6 +797,212 @@ class RPC:
         "https://docs.nano.org/commands/rpc-protocol/#uptime"
         data = {}
         data["action"] = "uptime"
+        return self._post(data)
+
+    def work_cancel(self, _hash):
+        "https://docs.nano.org/commands/rpc-protocol/#work_cancel"
+        data = {}
+        data["action"] = "work_cancel"
+        data["hash"] = _hash
+        return self._post(data)
+
+    def work_generate(
+        self,
+        _hash,
+        use_peers=False,
+        difficulty=None,
+        multiplier=0,
+        account=None,
+        version="work_1",
+        block=None,
+        json_block=False,
+    ):
+        "https://docs.nano.org/commands/rpc-protocol/#work_generate"
+        data = {}
+        data["action"] = "work_generate"
+        data["hash"] = _hash
+        if use_peers:
+            data["use_peers"] = True
+        if multiplier:
+            data["multiplier"] = multiplier
+        elif difficulty:
+            data["difficulty"] = difficulty
+        if account:
+            data["account"] = account
+        # Currently 'work_1' is the default and only valid option.
+        # if version in []: data['version'] = version
+        if block:
+            data["block"] = block
+            if json_block:
+                data["json_block"] = json_block
+        return self._post(data)
+
+    def work_peer_add(self, address, port):
+        "https://docs.nano.org/commands/rpc-protocol/#work_peer_add"
+        data = {}
+        data["action"] = "work_peer_add"
+        data["address"] = address
+        data["port"] = port
+        return self._post(data)
+
+    def work_peers(self):
+        "https://docs.nano.org/commands/rpc-protocol/#work_peers"
+        data = {}
+        data["action"] = "work_peers"
+        return self._post(data)
+
+    def work_peers_clear(self):
+        "https://docs.nano.org/commands/rpc-protocol/#work_peers_clear"
+        data = {}
+        data["action"] = "work_peers_clear"
+        return self._post(data)
+
+    def work_validate(
+        self, work, _hash, difficulty=None, multiplier=0, version="work_1"
+    ):
+        "https://docs.nano.org/commands/rpc-protocol/#work_validate"
+        data = {}
+        data["action"] = "work_validate"
+        data["work"] = work
+        data["hash"] = _hash
+        if multiplier:
+            data["multiplier"] = multiplier
+        elif difficulty:
+            data["difficulty"] = difficulty
+        # Currently 'work_1' is the default and only valid option.
+        # if version in []: data['version'] = version
+        return self._post(data)
+
+    # Wallet RPCs
+
+    def account_create(self, wallet, index=0, work=True):
+        "https://docs.nano.org/commands/rpc-protocol/#account_create"
+        data = {}
+        data["action"] = "account_create"
+        data["wallet"] = wallet
+        if index:
+            data["index"] = index
+        if not work:
+            data["work"] = False
+        return self._post(data)
+
+    def account_list(self, wallet):
+        "https://docs.nano.org/commands/rpc-protocol/#account_list"
+        data = {}
+        data["action"] = "account_list"
+        data["wallet"] = wallet
+        return self._post(data)
+
+    def account_move(self, wallet, source, accounts):
+        "https://docs.nano.org/commands/rpc-protocol/#account_move"
+        data = {}
+        data["action"] = "account_move"
+        data["wallet"] = wallet
+        data["source"] = source
+        data["accounts"] = accounts
+        return self._post(data)
+
+    def account_remove(self, wallet, account):
+        "https://docs.nano.org/commands/rpc-protocol/#account_remove"
+        data = {}
+        data["action"] = "account_remove"
+        data["wallet"] = wallet
+        data["account"] = account
+        return self._post(data)
+
+    def account_representative_set(self, wallet, account, representative, work=None):
+        "https://docs.nano.org/commands/rpc-protocol/#account_representative_set"
+        data = {}
+        data["action"] = "account_representative_set"
+        data["wallet"] = wallet
+        data["account"] = account
+        data["representative"] = representative
+        if work:
+            data["work"] = work
+        return self._post(data)
+
+    def accounts_create(self, wallet, count=1, work=True):
+        "https://docs.nano.org/commands/rpc-protocol/#accounts_create"
+        data = {}
+        data["action"] = "accounts_create"
+        data["wallet"] = wallet
+        data["count"] = count
+        if not work:
+            data["work"] = False
+        return self._post(data)
+
+    def password_change(self, wallet, password):
+        "https://docs.nano.org/commands/rpc-protocol/#password_change"
+        data = {}
+        data["action"] = "password_change"
+        data["wallet"] = wallet
+        data["password"] = password
+        return self._post(data)
+
+    def password_enter(self, wallet, password):
+        "https://docs.nano.org/commands/rpc-protocol/#password_enter"
+        data = {}
+        data["action"] = "password_enter"
+        data["wallet"] = wallet
+        data["password"] = password
+        return self._post(data)
+
+    def password_valid(self, wallet):
+        "https://docs.nano.org/commands/rpc-protocol/#password_valid"
+        data = {}
+        data["action"] = "password_valid"
+        data["wallet"] = wallet
+        return self._post(data)
+
+    def receive(self, wallet, account, block, work=None):
+        "https://docs.nano.org/commands/rpc-protocol/#receive"
+        data = {}
+        data["action"] = "receive"
+        data["wallet"] = wallet
+        data["account"] = account
+        data["block"] = block
+        if work:
+            data["work"] = work
+        return self._post(data)
+
+    def receive_minimum(self):
+        "https://docs.nano.org/commands/rpc-protocol/#receive_minimum"
+        data = {}
+        data["action"] = "receive_minimum"
+        return self._post(data)
+
+    def receive_minimum_set(self, amount):
+        "https://docs.nano.org/commands/rpc-protocol/#receive_minimum_set"
+        data = {}
+        data["action"] = "receive_minimum_set"
+        data["amount"] = amount
+        return self._post(data)
+
+    def search_pending(self, wallet):
+        "https://docs.nano.org/commands/rpc-protocol/#search_pending"
+        data = {}
+        data["action"] = "search_pending"
+        data["wallet"] = wallet
+        return self._post(data)
+
+    def search_pending_all(self):
+        "https://docs.nano.org/commands/rpc-protocol/#search_pending_all"
+        data = {}
+        data["action"] = "search_pending_all"
+        return self._post(data)
+
+    def send(self, wallet, source, destination, amount, _id=None, work=None):
+        "https://docs.nano.org/commands/rpc-protocol/#send"
+        data = {}
+        data["action"] = "send"
+        data["wallet"] = wallet
+        data["source"] = source
+        data["destination"] = destination
+        data["amount"] = amount
+        if _id:
+            data["id"] = _id
+        if work:
+            data["work"] = work
         return self._post(data)
 
     def wallet_add(self, wallet, key, work=True):
@@ -1006,13 +1079,6 @@ class RPC:
         data["wallet"] = wallet
         return self._post(data)
 
-    def wallet_info(self, wallet):
-        "https://docs.nano.org/commands/rpc-protocol/#wallet_info"
-        data = {}
-        data["action"] = "wallet_info"
-        data["wallet"] = wallet
-        return self._post(data)
-
     def wallet_history(self, wallet, modified_since=0):
         "https://docs.nano.org/commands/rpc-protocol/#wallet_history"
         data = {}
@@ -1022,12 +1088,19 @@ class RPC:
             data["modified_since"] = modified_since
         return self._post(data)
 
+    def wallet_info(self, wallet):
+        "https://docs.nano.org/commands/rpc-protocol/#wallet_info"
+        data = {}
+        data["action"] = "wallet_info"
+        data["wallet"] = wallet
+        return self._post(data)
+
     def wallet_ledger(
         self,
         wallet,
         representative=False,
         weight=False,
-        pending=False,
+        receivable=False,
         modified_since=None,
     ):
         "https://docs.nano.org/commands/rpc-protocol/#wallet_ledger"
@@ -1038,75 +1111,10 @@ class RPC:
             data["representative"] = True
         if weight:
             data["weight"] = True
-        if pending:
-            data["pending"] = True
+        if receivable:
+            data["receivable"] = True
         if modified_since:
             data["modified_since"] = modified_since
-        return self._post(data)
-
-    def wallet_pending(
-        self,
-        wallet,
-        count=1,
-        threshold=0,
-        source=False,
-        include_active=False,
-        min_version=False,
-        include_only_confirmed=False,
-    ):
-        "https://docs.nano.org/commands/rpc-protocol/#wallet_pending"
-        data = {}
-        data["action"] = "wallet_pending"
-        data["wallet"] = wallet
-        data["count"] = count
-        if threshold:
-            data["threshold"] = threshold
-        if source:
-            data["source"] = True
-        if include_active:
-            data["include_active"] = True
-        if min_version:
-            data["min_version"] = True
-        if include_only_confirmed:
-            data["include_only_confirmed"] = True
-        return self._post(data)
-
-    def wallet_republish(self, wallet, count=1):
-        "https://docs.nano.org/commands/rpc-protocol/#wallet_republish"
-        data = {}
-        data["action"] = "wallet_republish"
-        data["wallet"] = wallet
-        data["count"] = count
-        return self._post(data)
-
-    def wallet_work_get(self, wallet):
-        "https://docs.nano.org/commands/rpc-protocol/#wallet_work_get"
-        data = {}
-        data["action"] = "wallet_work_get"
-        data["wallet"] = wallet
-        return self._post(data)
-
-    def password_change(self, wallet, password):
-        "https://docs.nano.org/commands/rpc-protocol/#password_change"
-        data = {}
-        data["action"] = "password_change"
-        data["wallet"] = wallet
-        data["password"] = password
-        return self._post(data)
-
-    def password_enter(self, wallet, password):
-        "https://docs.nano.org/commands/rpc-protocol/#password_enter"
-        data = {}
-        data["action"] = "password_enter"
-        data["wallet"] = wallet
-        data["password"] = password
-        return self._post(data)
-
-    def password_valid(self, wallet):
-        "https://docs.nano.org/commands/rpc-protocol/#password_valid"
-        data = {}
-        data["action"] = "password_valid"
-        data["wallet"] = wallet
         return self._post(data)
 
     def wallet_lock(self, wallet):
@@ -1123,42 +1131,65 @@ class RPC:
         data["wallet"] = wallet
         return self._post(data)
 
-    def work_cancel(self, _hash):
-        "https://docs.nano.org/commands/rpc-protocol/#work_cancel"
+    def wallet_pending(
+        self,
+        wallet,
+        count=1,
+        threshold=0,
+        source=False,
+        include_active=False,
+        min_version=False,
+        include_only_confirmed=True,
+    ):
+        "https://docs.nano.org/commands/rpc-protocol/#wallet_pending"
         data = {}
-        data["action"] = "work_cancel"
-        data["hash"] = _hash
+        data["action"] = "wallet_pending"
+        data["wallet"] = wallet
+        data["count"] = count
+        if threshold:
+            data["threshold"] = threshold
+        if source:
+            data["source"] = True
+        if include_active:
+            data["include_active"] = True
+        if min_version:
+            data["min_version"] = True
+        if not include_only_confirmed:
+            data["include_only_confirmed"] = False
         return self._post(data)
 
-    def work_generate(
-        self,
-        _hash,
-        use_peers=False,
-        difficulty=None,
-        multiplier=0,
-        account=None,
-        version="work_1",
-        block=None,
-        json_block=False,
-    ):
-        "https://docs.nano.org/commands/rpc-protocol/#work_generate"
+    def wallet_representative(self, wallet):
+        "https://docs.nano.org/commands/rpc-protocol/#wallet_representative"
         data = {}
-        data["action"] = "work_generate"
-        data["hash"] = _hash
-        if use_peers:
-            data["use_peers"] = True
-        if multiplier:
-            data["multiplier"] = multiplier
-        elif difficulty:
-            data["difficulty"] = difficulty
-        if account:
-            data["account"] = account
-        # Currently 'work_1' is the default and only valid option.
-        # if version in []: data['version'] = version
-        if block:
-            data["block"] = block
-            if json_block:
-                data["json_block"] = json_block
+        data["action"] = "wallet_representative"
+        data["wallet"] = wallet
+        return self._post(data)
+
+    def wallet_representative_set(
+        self, wallet, representative, update_existing_accounts=False
+    ):
+        "https://docs.nano.org/commands/rpc-protocol/#wallet_representative_set"
+        data = {}
+        data["action"] = "wallet_representative_set"
+        data["wallet"] = wallet
+        data["representative"] = representative
+        if update_existing_accounts:
+            data["update_existing_accounts"] = True
+        return self._post(data)
+
+    def wallet_republish(self, wallet, count=1):
+        "https://docs.nano.org/commands/rpc-protocol/#wallet_republish"
+        data = {}
+        data["action"] = "wallet_republish"
+        data["wallet"] = wallet
+        data["count"] = count
+        return self._post(data)
+
+    def wallet_work_get(self, wallet):
+        "https://docs.nano.org/commands/rpc-protocol/#wallet_work_get"
+        data = {}
+        data["action"] = "wallet_work_get"
+        data["wallet"] = wallet
         return self._post(data)
 
     def work_get(self, wallet, account):
@@ -1178,38 +1209,18 @@ class RPC:
         data["work"] = work
         return self._post(data)
 
-    def work_peer_add(self, address, port):
-        "https://docs.nano.org/commands/rpc-protocol/#work_peer_add"
+    # Unit conversion RPCs
+
+    def nano_to_raw(self, amount):
+        "https://docs.nano.org/commands/rpc-protocol/#nano_to_raw"
         data = {}
-        data["action"] = "work_peer_add"
-        data["address"] = address
-        data["port"] = port
+        data["action"] = "nano_to_raw"
+        data["amount"] = amount
         return self._post(data)
 
-    def work_peers(self):
-        "https://docs.nano.org/commands/rpc-protocol/#work_peers"
+    def raw_to_nano(self, amount):
+        "https://docs.nano.org/commands/rpc-protocol/#raw_to_nano"
         data = {}
-        data["action"] = "work_peers"
-        return self._post(data)
-
-    def work_peers_clear(self):
-        "https://docs.nano.org/commands/rpc-protocol/#work_peers_clear"
-        data = {}
-        data["action"] = "work_peers_clear"
-        return self._post(data)
-
-    def work_validate(
-        self, work, _hash, difficulty=None, multiplier=0, version="work_1"
-    ):
-        "https://docs.nano.org/commands/rpc-protocol/#work_validate"
-        data = {}
-        data["action"] = "work_validate"
-        data["work"] = work
-        data["hash"] = _hash
-        if multiplier:
-            data["multiplier"] = multiplier
-        elif difficulty:
-            data["difficulty"] = difficulty
-        # Currently 'work_1' is the default and only valid option.
-        # if version in []: data['version'] = version
+        data["action"] = "raw_to_nano"
+        data["amount"] = amount
         return self._post(data)

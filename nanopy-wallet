@@ -337,7 +337,7 @@ elif args.network in ["banano", "ban"]:
 else:
     args.network = "nano"
     rpc_url = "http://localhost:7076"
-    std_unit = "₦"
+    std_unit = "Ӿ"
     available_supply = 133248061999106578273467128948453216035
 
 home_npy = os.path.expanduser("~") + "/.config/nanopy/"
@@ -375,14 +375,17 @@ if online:
         online = True
 
 if online:
-    iploc = RPC(
-        url="http://ipinfo.io/json",
-        tor=(args.tor or config["DEFAULT"].getboolean("tor", fallback=args.tor)),
-    )._get()
     try:
-        print(bcolors.warn1, iploc["city"], iploc["country"], bcolors.end)
+        iploc = RPC(
+            url="http://ipinfo.io/json",
+            tor=(args.tor or config["DEFAULT"].getboolean("tor", fallback=args.tor)),
+        )._get()
+        try:
+            print(bcolors.warn1, iploc["city"], iploc["country"], bcolors.end)
+        except:
+            print(iploc)
     except:
-        print(iploc)
+        pass
     rpc = RPC(
         url=config["DEFAULT"].get("rpc", fallback=rpc_url),
         tor=(args.tor or config["DEFAULT"].getboolean("tor", fallback=args.tor)),
