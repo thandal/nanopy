@@ -1,20 +1,17 @@
 import os, timeit
 import nanopy as npy
 from nanopy.rpc import RPC
-from nanopy.ed25519_blake2b import checkvalid, publickey
 
 # signature
 
-tk = "0000000000000000000000000000000000000000000000000000000000000000"
-m = "test"
-assert (
-    checkvalid(
-        bytes.fromhex(npy.sign(tk, _hash=None, msg=m)),
-        m.encode(),
-        publickey(bytes.fromhex(tk)),
-    )
-    == 0
+tk, pk, _ = npy.key_expand(
+    "0000000000000000000000000000000000000000000000000000000000000000"
 )
+m = "test"
+sig = npy.sign(tk, msg=m)
+assert npy.verify_signature(m, sig, pk)
+m = "fail"
+assert not npy.verify_signature(m, sig, pk)
 
 # work computation
 
@@ -31,6 +28,9 @@ assert npy.work_validate(w, h, multiplier=1 / 8)
 
 # n = 20
 # print(timeit.timeit("npy.work_generate('0feb848ce9637cbc3b41e0334ecef8cf76350f689604a85bae5a2768891ac6e9', multiplier=1/8)",    setup="import nanopy as npy", number=n,)/n)
+
+assert "0.000000000000000000000123456789" == npy.from_raw("123456789")
+assert "123456789" == npy.to_raw("0.000000000000000000000123456789")
 
 # https://docs.nano.org/integration-guides/key-management/
 
